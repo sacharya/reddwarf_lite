@@ -21,6 +21,7 @@ import weakref
 from eventlet import greenthread
 
 from reddwarf.common import excutils
+from reddwarf.common import utils
 from reddwarf.common import service
 
 
@@ -32,6 +33,7 @@ class TaskManager(service.Manager):
 
     def __init__(self, *args, **kwargs):
         self.tasks = weakref.WeakKeyDictionary()
+        self.create_tasks()
         super(TaskManager, self).__init__(*args, **kwargs)
         LOG.info(_("TaskManager init %s %s") % (args, kwargs))
 
@@ -44,9 +46,25 @@ class TaskManager(service.Manager):
         # re-implement when we have actual tasks.
         self.tasks[greenthread.getcurrent()] = context
         try:
-            func = getattr(self, method)
-            func(context, *args, **kwargs)
+            func = getattr(self.task_driver, method)
+            return func(context, *args, **kwargs)
         except Exception as e:
             excutils.save_and_reraise_exception()
         finally:
             del self.tasks[greenthread.getcurrent()]
+
+    def create_tasks(self):
+        tasks = ['reddwarf.taskmanager.tasks.InstanceTasks']
+        classes = []
+        for task in tasks:
+            LOG.info(task)
+            task = utils.import_class(task)
+            classes.append(task)
+        try:
+            cls = type("Tasks", tuple(set(classes)), {})
+            self.task_driver = cls()
+        except TypeError as te:
+            msg = "An issue occurred instantiating the Tasks as the "\
+                  "following classes: " + str(classes) +\
+                  " Exception=" + str(te)
+            raise TypeError(msg)

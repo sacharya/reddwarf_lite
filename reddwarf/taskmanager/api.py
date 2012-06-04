@@ -37,14 +37,18 @@ class API(object):
         self.context = context
 
     def _call(self, method_name, **kwargs):
+        LOG.debug("Calling %s" % method_name)
         try:
-            return rpc.call(self.context, self._get_routing_key(),
+            result = rpc.call(self.context, self._get_routing_key(),
                             {"method": method_name, "args": kwargs})
+            LOG.debug("Result is %s" % result)
+            return result
         except Exception as e:
             LOG.error(e)
             raise exception.TaskManagerError(original_message=str(e))
 
     def _cast(self, method_name, **kwargs):
+        LOG.debug("Calling %s" % method_name)
         try:
             rpc.cast(self.context, self._get_routing_key(),
                     {"method": method_name, "args": kwargs})
@@ -55,3 +59,10 @@ class API(object):
     def _get_routing_key(self):
         """Create the routing key for the taskmanager"""
         return "taskmanager"
+
+    def create_volume(self, instance_id, volume_size):
+        return self._call("create_volume", instance_id=instance_id, volume_size=volume_size)
+
+    def create_dns_entry(self, server_id, instance_id):
+        return self._cast("create_dns_entry", server_id=server_id, instance_id=instance_id)
+

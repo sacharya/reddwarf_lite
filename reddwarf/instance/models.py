@@ -35,6 +35,7 @@ from reddwarf.common.remote import create_dns_client
 from reddwarf.common.remote import create_guest_client
 from reddwarf.common.remote import create_nova_client
 from reddwarf.common.remote import create_nova_volume_client
+from reddwarf.common.remote import create_task_manager_client
 from reddwarf.guestagent import api as guest_api
 from reddwarf.instance.tasks import InstanceTask
 from reddwarf.instance.tasks import InstanceTasks
@@ -273,17 +274,27 @@ class Instance(object):
             task_status=InstanceTasks.NONE)
         LOG.debug(_("Created new Reddwarf instance %s...") % db_info.id)
 
-        if volume_size:
-            volume_info = cls._create_volume(context, db_info, volume_size)
-            block_device_mapping = volume_info['block_device']
-            device_path = volume_info['device_path']
-            mount_point = volume_info['mount_point']
-            volumes = volume_info['volumes']
+        volume_support = config.Config.get("reddwarf_volume_support", 'False')
+        LOG.debug(_("reddwarf volume support = %s") % volume_support)
+        if utils.bool_from_string(volume_support):
+            if volume_size:
+                task_client = create_task_manager_client(context)
+                volume_info = task_client.create_volume(db_info.id, volume_size)
+                block_device_mapping = volume_info['block_device']
+                device_path = volume_info['device_path']
+                mount_point = volume_info['mount_point']
+                volumes = volume_info['volumes']
+            else:
+                block_device_mapping = None
+                device_path = None
+                mount_point = None
+                volumes = []
         else:
-            block_device_mapping = None
+            LOG.debug(_("Skipping setting up the volume"))
+            block_device = None
             device_path = None
             mount_point = None
-            volumes = []
+            volumes = None
 
         client = create_nova_client(context)
         files = {"/etc/guest_info": "guest_id=%s\nservice_type=%s\n" %
@@ -309,20 +320,10 @@ class Instance(object):
 
         dns_support = config.Config.get("reddwarf_dns_support", 'False')
         LOG.debug(_("reddwarf dns support = %s") % dns_support)
-        dns_client = create_dns_client(context)
-        # Default the hostname to instance name if no dns support
-        dns_client.update_hostname(db_info)
         if utils.bool_from_string(dns_support):
-            #TODO: Bring back our good friend poll_until.
-            while(server.addresses == {}):
-                import time
-                time.sleep(1)
-                server = client.servers.get(server.id)
-                LOG.debug("Waiting for address %s" % server.addresses)
-
-            dns_client.create_instance_entry(db_info['id'],
-                          get_ip_address(server.addresses))
-
+            task_client = create_task_manager_client(context)
+            task_client.create_dns_entry(server.id, db_info.id)
+            
         return Instance(context, db_info, server, service_status, volumes)
 
     def get_guest(self):

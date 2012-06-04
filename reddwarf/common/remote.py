@@ -21,6 +21,9 @@ from novaclient.v1_1.client import Client
 
 CONFIG = config.Config
 
+def create_task_manager_client(context):
+    from reddwarf.taskmanager.api import API
+    return API(context)
 
 def create_dns_client(context):
     from reddwarf.dns.manager import DnsManager

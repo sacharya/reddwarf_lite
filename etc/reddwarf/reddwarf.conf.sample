@@ -51,7 +51,7 @@ device_path = /dev/vdb
 mount_point = /var/lib/mysql
 
 # Reddwarf DNS
-reddwarf_dns_support = False
+reddwarf_dns_support = True
 #dns_driver=reddwarf.dns.rsdns.driver.RsDnsDriver
 #dns_instance_entry_factory=reddwarf.dns.rsdns.driver.RsDnsInstanceEntryFactory
 #dns_account_id=0
