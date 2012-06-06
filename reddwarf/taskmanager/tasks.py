@@ -16,20 +16,20 @@ import logging
 
 from eventlet import greenthread
 
-from reddwarf.common import config
+from reddwarf.common import config, context
 from reddwarf.common import exception as rd_exceptions
-from reddwarf.common.remote import create_nova_volume_client
+from reddwarf.common.remote import create_nova_volume_client, create_guest_client
 from reddwarf.common.remote import create_dns_client
 from reddwarf.common.remote import create_nova_client
-from reddwarf.instance.models import DBInstance
+from reddwarf.instance.models import DBInstance, InstanceServiceStatus, ServiceStatuses, populate_databases
 from reddwarf.instance.views import get_ip_address
 
 LOG = logging.getLogger(__name__)
 
 class InstanceTasks(object):
 
-    def __init__(self):
-        pass
+    def __init__(self, context):
+        self.context = context
 
     def create_volume(self, context, instance_id, volume_size):
         LOG.info("Entering create_volume")
@@ -99,6 +99,55 @@ class InstanceTasks(object):
         dns_client.update_hostname(db_info)
 
         # Update Dns entry
-        dns_client.create_instance_entry(instance_id, get_ip_address(server.addresses))
+        dns_client.create_instance_entry(instance_id,
+            get_ip_address(server.addresses))
         LOG.info("Finished")
+
+    def create_server(self, context, instance_id, name, flavor_ref, image_id,
+                      service_type, block_device_mapping):
+        client = create_nova_client(context)
+        files = {"/etc/guest_info": "guest_id=%s\nservice_type=%s\n" %
+                                    (instance_id, service_type)}
+        server = client.servers.create(name, image_id, flavor_ref,
+            files=files, block_device_mapping=block_device_mapping)
+        LOG.debug(_("Created new compute instance %s.") % server.id)
+        return server
+
+    def guest_prepare(self, context, server, db_info, volume_info, databases):
+        LOG.info("Entering guest_prepare")
+        db_info.compute_instance_id = server.id
+        db_info.save()
+        service_status = InstanceServiceStatus.create(instance_id=db_info.id,
+            status=ServiceStatuses.NEW)
+        # Now wait for the response from the create to do additional work
+
+        guest = create_guest_client(context, db_info.id)
+
+        # populate the databases
+        model_schemas = populate_databases(databases)
+        guest.prepare(512, model_schemas, users=[],
+            device_path=volume_info['device_path'],
+            mount_point=volume_info['mount_point'])
+
+    def create_instance(self, context, instance_id, name, flavor_ref,
+                        image_id, databases, service_type, volume_size):
+        LOG.info("Entering create_instance")
+        try:
+            db_info = DBInstance.find_by(id=instance_id)
+            volume_info = self.create_volume(context, instance_id,
+                    volume_size)
+            block_device_mapping = volume_info['block_device']
+            server = self.create_server(context, instance_id, name,
+                    flavor_ref, image_id, service_type,block_device_mapping)
+            LOG.info("server id: %s" %server)
+            server_id = server.id
+            self.create_dns_entry(context, server_id, instance_id)
+            LOG.info("volume_info %s" %volume_info)
+            try:
+                self.guest_prepare(context, server, db_info, volume_info, databases)
+            except Exception, e:
+                LOG.error(e)
+            return server
+        except Exception, e:
+            LOG.error(e)
 

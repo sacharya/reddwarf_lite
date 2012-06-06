@@ -61,8 +61,18 @@ class API(object):
         return "taskmanager"
 
     def create_volume(self, instance_id, volume_size):
-        return self._call("create_volume", instance_id=instance_id, volume_size=volume_size)
+        return self._call("create_volume", instance_id=instance_id,
+                            volume_size=volume_size)
 
     def create_dns_entry(self, server_id, instance_id):
-        return self._cast("create_dns_entry", server_id=server_id, instance_id=instance_id)
+        return self._cast("create_dns_entry", server_id=server_id,
+                            instance_id=instance_id)
+
+    def create_instance(self, instance_id, name, flavor_ref, image_id,
+                        databases, service_type, volume_size):
+        return self._cast("create_instance", instance_id=instance_id,
+            name=name, flavor_ref=flavor_ref,
+            image_id=image_id, databases=databases,
+            service_type=service_type,
+            volume_size=volume_size)
 

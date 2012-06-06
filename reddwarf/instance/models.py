@@ -274,56 +274,77 @@ class Instance(object):
             task_status=InstanceTasks.NONE)
         LOG.debug(_("Created new Reddwarf instance %s...") % db_info.id)
 
-        volume_support = config.Config.get("reddwarf_volume_support", 'False')
-        LOG.debug(_("reddwarf volume support = %s") % volume_support)
-        if utils.bool_from_string(volume_support):
-            if volume_size:
-                task_client = create_task_manager_client(context)
-                volume_info = task_client.create_volume(db_info.id, volume_size)
-                block_device_mapping = volume_info['block_device']
-                device_path = volume_info['device_path']
-                mount_point = volume_info['mount_point']
-                volumes = volume_info['volumes']
-            else:
-                block_device_mapping = None
-                device_path = None
-                mount_point = None
-                volumes = []
-        else:
-            LOG.debug(_("Skipping setting up the volume"))
-            block_device = None
-            device_path = None
-            mount_point = None
-            volumes = None
+        LOG.info("flavor_ref %s" % flavor_ref)
+        try:
+            flavor_id = utils.get_id_from_href(flavor_ref)
+            client = create_nova_client(context)
+            flavor = client.flavors.get(flavor_id)
+        except nova_exceptions.NotFound:
+            raise rd_exceptions.FlavorNotFound(uuid=flavor_id)
 
-        client = create_nova_client(context)
-        files = {"/etc/guest_info": "guest_id=%s\nservice_type=%s\n" %
-                 (db_info.id, service_type)}
-        server = client.servers.create(name, image_id, flavor_ref,
-                     files=files,
-                     block_device_mapping=block_device_mapping)
-        LOG.debug(_("Created new compute instance %s.") % server.id)
+        task_client = create_task_manager_client(context)
+        task_client.create_instance(db_info.id, name, flavor_ref, image_id,
+            databases, service_type, volume_size)
 
-        db_info.compute_instance_id = server.id
-        db_info.save()
-        service_status = InstanceServiceStatus.create(instance_id=db_info.id,
-            status=ServiceStatuses.NEW)
+        #volume_support = config.Config.get("reddwarf_volume_support", 'False')
+        #LOG.debug(_("reddwarf volume support = %s") % volume_support)
+        #if utils.bool_from_string(volume_support):
+        #    if volume_size:
+        #        task_client = create_task_manager_client(context)
+        #        volume_info = task_client.create_volume(db_info.id, volume_size)
+        #        block_device_mapping = volume_info['block_device']
+        #        device_path = volume_info['device_path']
+        #        mount_point = volume_info['mount_point']
+        #        volumes = volume_info['volumes']
+        #    else:
+        #        block_device_mapping = None
+        #        device_path = None
+        #        mount_point = None
+        #        volumes = []
+        #else:
+        #    LOG.debug(_("Skipping setting up the volume"))
+        #    block_device_mapping = None
+        #    device_path = None
+        #    mount_point = None
+        #    volumes = None
+
+        #client = create_nova_client(context)
+        #files = {"/etc/guest_info": "guest_id=%s\nservice_type=%s\n" %
+        #         (db_info.id, service_type)}
+        #server = client.servers.create(name, image_id, flavor_ref,
+        #             files=files,
+        #             block_device_mapping=block_device_mapping)
+        #LOG.debug(_("Created new compute instance %s.") % server.id)
+
+        #db_info.compute_instance_id = server.id
+        #db_info.save()
+        #service_status = InstanceServiceStatus.create(instance_id=db_info.id,
+        #    status=ServiceStatuses.NEW)
         # Now wait for the response from the create to do additional work
 
-        guest = create_guest_client(context, db_info.id)
+        #guest = create_guest_client(context, db_info.id)
 
         # populate the databases
-        model_schemas = populate_databases(databases)
-        guest.prepare(512, model_schemas, users=[],
-                      device_path=device_path,
-                      mount_point=mount_point)
+        #model_schemas = populate_databases(databases)
+        #guest.prepare(512, model_schemas, users=[],
+        #              device_path=device_path,
+        #              mount_point=mount_point)
 
-        dns_support = config.Config.get("reddwarf_dns_support", 'False')
-        LOG.debug(_("reddwarf dns support = %s") % dns_support)
-        if utils.bool_from_string(dns_support):
-            task_client = create_task_manager_client(context)
-            task_client.create_dns_entry(server.id, db_info.id)
-            
+        #dns_support = config.Config.get("reddwarf_dns_support", 'False')
+        #LOG.debug(_("reddwarf dns support = %s") % dns_support)
+        #if utils.bool_from_string(dns_support):
+        #    task_client = create_task_manager_client(context)
+        #    task_client.create_dns_entry(server.id, db_info.id)
+        server = None
+        #server.addresses = {}
+        #server.status = 'BUILD'
+        volumes = [{'size': volume_size}]
+        try:
+            service_status = InstanceServiceStatus.find_by(instance_id=db_info.id)
+        except Exception, e:
+            service_status = InstanceServiceStatus.create(instance_id=db_info.id,
+                status=ServiceStatuses.NEW)
+
         return Instance(context, db_info, server, service_status, volumes)
 
     def get_guest(self):
@@ -344,7 +365,7 @@ class Instance(object):
 
     @property
     def name(self):
-        return self.server.name
+        return self.db_info.name
 
     @property
     def status(self):
@@ -356,8 +377,9 @@ class Instance(object):
         if InstanceTasks.RESIZING == self.db_info.task_status:
             return InstanceStatus.RESIZE
         # If the server is in any of these states they take precedence.
-        if self.server.status in ["BUILD", "ERROR", "REBOOT", "RESIZE"]:
-            return self.server.status
+        if self.server:
+            if self.server.status in ["BUILD", "ERROR", "REBOOT", "RESIZE"]:
+                return self.server.status
         # The service is only paused during a reboot.
         if ServiceStatuses.PAUSED == self.service_status.status:
             return InstanceStatus.REBOOT
@@ -384,17 +406,20 @@ class Instance(object):
 
     @property
     def flavor(self):
-        return self.server.flavor
+        if self.server:
+            return self.server.flavor
 
     @property
     def links(self):
-        return self.server.links
+        if self.server:
+            return self.server.links
 
     @property
     def addresses(self):
         #TODO(tim.simpson): Review whether we should be returning the server
         # addresses.
-        return self.server.addresses
+        if self.server:
+            return self.server.addresses
 
     @staticmethod
     def _build_links(links):

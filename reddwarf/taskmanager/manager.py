@@ -23,6 +23,7 @@ from eventlet import greenthread
 from reddwarf.common import excutils
 from reddwarf.common import utils
 from reddwarf.common import service
+from reddwarf.taskmanager.tasks import InstanceTasks
 
 
 LOG = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class TaskManager(service.Manager):
 
     def __init__(self, *args, **kwargs):
         self.tasks = weakref.WeakKeyDictionary()
-        self.create_tasks()
+        #self.create_tasks()
         super(TaskManager, self).__init__(*args, **kwargs)
         LOG.info(_("TaskManager init %s %s") % (args, kwargs))
 
@@ -46,7 +47,7 @@ class TaskManager(service.Manager):
         # re-implement when we have actual tasks.
         self.tasks[greenthread.getcurrent()] = context
         try:
-            func = getattr(self.task_driver, method)
+            func = getattr(self, method)
             return func(context, *args, **kwargs)
         except Exception as e:
             excutils.save_and_reraise_exception()
@@ -68,3 +69,33 @@ class TaskManager(service.Manager):
                   "following classes: " + str(classes) +\
                   " Exception=" + str(te)
             raise TypeError(msg)
+
+    def create_instance(self, context, instance_id, name, flavor_ref,
+                        image_id, databases, service_type, volume_size ):
+        LOG.info("Entering manager.create_instance")
+        instance_tasks = InstanceTasks(context)
+        instance_tasks.create_instance(context, instance_id, name, flavor_ref,
+            image_id, databases, service_type, volume_size)
+
+    def create_volume(self, context, instance_id, volume_size):
+        LOG.info("Entering manager.create_volume")
+        instance_tasks = InstanceTasks(context)
+        instance_tasks.create_volume(context, instance_id, volume_size)
+
+    def create_server(self, context, instance_id, name, flavor_ref, image_id,
+                      service_type, block_device_mapping):
+        LOG.info("Entering manager.create_server")
+        instance_tasks = InstanceTasks(context)
+        instance_tasks.create_server(context, instance_id, name, flavor_ref, image_id,
+            service_type, block_device_mapping)
+
+    def create_dns_entry(self, context, server_id, instance_id):
+        LOG.info("Entering manager.create_dns_entry")
+        instance_tasks = InstanceTasks(context)
+        instance_tasks.create_dns_entry(context, server_id, instance_id)
+
+    def guest_prepare(self, context, server, db_info, volume_info, databases):
+        LOG.info("Entering manager.guest_prepare")
+        instance_tasks = InstanceTasks(context)
+        instance_tasks.guest_prepare(context, server, db_info, volume_info, databases)
+
