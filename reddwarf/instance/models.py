@@ -142,6 +142,57 @@ def ExecuteInstanceMethod(context, id, method_name, *args, **kwargs):
     func = getattr(instance, method_name)
     func(*args, **kwargs)
 
+class SimpleInstance(object):
+
+    def __init__(self, context, db_info, service_status):
+        self.context = context
+        self.db_info = db_info
+        self.service_status = service_status
+
+    @staticmethod
+    def load(context, id):
+        if context is None:
+            raise TypeError("Argument context not defined.")
+        elif id is None:
+            raise TypeError("Argument id not defined.")
+        try:
+            db_info = DBInstance.find_by(id=id)
+        except rd_exceptions.NotFound:
+            raise rd_exceptions.NotFound(uuid=id)
+        task_status = db_info.task_status
+        service_status = InstanceServiceStatus.find_by(instance_id=id)
+        LOG.info("service status=%s" % service_status)
+        return SimpleInstance(context, db_info, service_status)
+
+    @property
+    def name(self):
+        return self.db_info.name
+
+    @property
+    def id(self):
+        return self.db_info.id
+
+    @property
+    def hostname(self):
+        return self.db_info.hostname
+
+    @property
+    def status(self):
+        if ServiceStatuses.PAUSED == self.service_status.status:
+            return InstanceStatus.REBOOT
+        # If the service status is NEW, then we are building.
+        if ServiceStatuses.NEW == self.service_status.status:
+            return InstanceStatus.BUILD
+
+    @property
+    def created(self):
+        return self.db_info.created
+
+    @property
+    def updated(self):
+        return self.db_info.updated
+
+
 
 class Instance(object):
     """Represents an instance.
@@ -277,68 +328,58 @@ class Instance(object):
             task_status=InstanceTasks.NONE)
         LOG.debug(_("Created new Reddwarf instance %s...") % db_info.id)
 
-        if volume_size:
-            volume_info = cls._create_volume(context, db_info, volume_size)
-            block_device_mapping = volume_info['block_device']
-            device_path = volume_info['device_path']
-            mount_point = volume_info['mount_point']
-            volumes = volume_info['volumes']
-        else:
-            block_device_mapping = None
-            device_path = None
-            mount_point = None
-            volumes = []
+        task_api.API(context).create_instance(db_info.id, name,
+                            flavor_ref, image_id, databases, service_type,
+                            volume_size)
 
-        client = create_nova_client(context)
-        files = {"/etc/guest_info": "guest_id=%s\nservice_type=%s\n" %
-                 (db_info.id, service_type)}
-        server = client.servers.create(name, image_id, flavor_ref,
-                     files=files,
-                     block_device_mapping=block_device_mapping)
-        LOG.debug(_("Created new compute instance %s.") % server.id)
+        #if volume_size:
+        #    volume_info = cls._create_volume(context, db_info, volume_size)
+        #    block_device_mapping = volume_info['block_device']
+        #    device_path = volume_info['device_path']
+        #    mount_point = volume_info['mount_point']
+        #    volumes = volume_info['volumes']
+        #else:
+        #    block_device_mapping = None
+        #    device_path = None
+        #    mount_point = None
+        #    volumes = []
 
-        db_info.compute_instance_id = server.id
-        db_info.save()
-        service_status = InstanceServiceStatus.create(instance_id=db_info.id,
-            status=ServiceStatuses.NEW)
+        #client = create_nova_client(context)
+        #files = {"/etc/guest_info": "guest_id=%s\nservice_type=%s\n" %
+        #         (db_info.id, service_type)}
+        #server = client.servers.create(name, image_id, flavor_ref,
+        #             files=files,
+        #             block_device_mapping=block_device_mapping)
+        #LOG.debug(_("Created new compute instance %s.") % server.id)
+
+        #db_info.compute_instance_id = server.id
+        #db_info.save()
+        #service_status = InstanceServiceStatus.create(instance_id=db_info.id,
+        #    status=ServiceStatuses.NEW)
         # Now wait for the response from the create to do additional work
 
-        guest = create_guest_client(context, db_info.id)
+        #guest = create_guest_client(context, db_info.id)
 
         # populate the databases
-        model_schemas = populate_databases(databases)
-        guest.prepare(512, model_schemas, users=[],
-                      device_path=device_path,
-                      mount_point=mount_point)
+        #model_schemas = populate_databases(databases)
+        #guest.prepare(512, model_schemas, users=[],
+        #              device_path=device_path,
+        #              mount_point=mount_point)
 
-        dns_support = config.Config.get("reddwarf_dns_support", 'False')
-        LOG.debug(_("reddwarf dns support = %s") % dns_support)
-        dns_client = create_dns_client(context)
+        #dns_support = config.Config.get("reddwarf_dns_support", 'False')
+        #LOG.debug(_("reddwarf dns support = %s") % dns_support)
+        #dns_client = create_dns_client(context)
         # Default the hostname to instance name if no dns support
-        dns_client.update_hostname(db_info)
-        if utils.bool_from_string(dns_support):
+        #dns_client.update_hostname(db_info)
+        #task_api.API(context).create_dns_entry(db_info.id, server.id)
 
-            def get_server():
-                return client.servers.get(server.id)
+        server = None
+        volumes = [{'size': 2}]
+        service_status = InstanceServiceStatus.create(instance_id=db_info.id,
+                                                      status=ServiceStatuses.NEW)
 
-            def ip_is_available(server):
-                if server.addresses != {}:
-                    return True
-                elif server.addresses == {} and\
-                     server.status != InstanceStatus.ERROR:
-                    return False
-                elif server.addresses == {} and\
-                     server.status == InstanceStatus.ERROR:
-                    LOG.error(_("Instance IP not available, instance (%s): server had "
-                                " status (%s).") % (db_info['id'], server.status))
-                    raise rd_exceptions.ReddwarfError(
-                        status=server.status)
-            poll_until(get_server, ip_is_available, sleep_time=1, time_out=60*2)
-
-            dns_client.create_instance_entry(db_info['id'],
-                          get_ip_address(server.addresses))
-
-        return Instance(context, db_info, server, service_status, volumes)
+        return SimpleInstance(context, db_info, service_status)
+        #return Instance(context, db_info, server, service_status, volumes)
 
     def get_guest(self):
         return create_guest_client(self.context, self.db_info.id)

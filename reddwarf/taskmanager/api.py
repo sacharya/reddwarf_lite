@@ -60,3 +60,12 @@ class API(object):
         LOG.debug("Making async call to resize volume for instance: %s"
                  % instance_id)
         self._cast("resize_volume", new_size=new_size, instance_id=instance_id)
+
+    def create_instance(self, instance_id, name, flavor_ref, image_id,
+                        databases, service_type, volume_size):
+        LOG.debug("Making async call to create instance %s " % instance_id)
+        self._cast("create_instance", instance_id=instance_id, name=name,
+                   flavor_ref=flavor_ref, image_id=image_id,
+                   databases=databases, service_type=service_type,
+                   volume_size=volume_size)
+

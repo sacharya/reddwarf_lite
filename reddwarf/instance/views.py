@@ -49,8 +49,8 @@ class InstanceView(object):
         self.req = req
 
     def data(self):
-        ip = get_ip_address(self.instance.addresses)
-        volumes = get_volumes(self.instance.volumes)
+        #ip = get_ip_address(self.instance.addresses)
+        #volumes = get_volumes(self.instance.volumes)
         instance_dict = {
             "id": self.instance.id,
             "name": self.instance.name,
@@ -60,10 +60,10 @@ class InstanceView(object):
         dns_support = config.Config.get("reddwarf_dns_support", 'False')
         if utils.bool_from_string(dns_support):
             instance_dict['hostname'] = self.instance.db_info.hostname
-        if self.add_addresses and ip is not None and len(ip) > 0:
-            instance_dict['ip'] = ip
-        if self.add_volumes and volumes is not None:
-            instance_dict['volume'] = volumes
+        #if self.add_addresses and ip is not None and len(ip) > 0:
+        #    instance_dict['ip'] = ip
+        #if self.add_volumes and volumes is not None:
+        #    instance_dict['volume'] = volumes
         LOG.debug(instance_dict)
         return {"instance": instance_dict}
 

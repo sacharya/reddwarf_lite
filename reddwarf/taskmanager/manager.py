@@ -16,6 +16,7 @@
 #    under the License.
 
 import logging
+import traceback
 import weakref
 
 from eventlet import greenthread
@@ -23,6 +24,7 @@ from eventlet import greenthread
 from reddwarf.common import excutils
 from reddwarf.common import service
 from reddwarf.taskmanager import models
+from reddwarf.taskmanager.models import InstanceTasks
 
 
 LOG = logging.getLogger(__name__)
@@ -48,6 +50,8 @@ class TaskManager(service.Manager):
             func = getattr(self, method)
             func(context, *args, **kwargs)
         except Exception as e:
+            LOG.error("Got an error running %s!" % method)
+            LOG.debug(traceback.format_exc())
             excutils.save_and_reraise_exception()
         finally:
             del self.tasks[greenthread.getcurrent()]
@@ -55,3 +59,10 @@ class TaskManager(service.Manager):
     def resize_volume(self, context, instance_id, new_size):
         instance_tasks = models.InstanceTasks.load(context, instance_id)
         instance_tasks.resize_volume(new_size)
+
+    def create_instance(self, context, instance_id, name, flavor_ref,
+                        image_id, databases, service_type, volume_size):
+        instance_tasks = InstanceTasks(context)
+        instance_tasks.create_instance(instance_id, name, flavor_ref,
+                                      image_id, databases,
+                                      service_type, volume_size)
